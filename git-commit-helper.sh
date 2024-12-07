@@ -1,7 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# ^ Using /usr/bin/env for better portability across shells
 
 # Configuration
-CONFIG_DIR="$HOME/.config/git-commit-helper"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/git-commit-helper"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 CACHE_DIR="$CONFIG_DIR/cache"
 CACHE_DURATION=3600  # Cache duration in seconds (1 hour)
@@ -11,7 +12,7 @@ mkdir -p "$CONFIG_DIR" "$CACHE_DIR"
 
 # Create default config if it doesn't exist
 if [ ! -f "$CONFIG_FILE" ]; then
-    cat > "$CONFIG_FILE" << EOF
+    cat > "$CONFIG_FILE" << 'EOF'
 {
     "api_key": "",
     "model": "claude-3-sonnet-20240229",
@@ -26,13 +27,15 @@ fi
 
 # Function to show help
 show_help() {
-    echo "Usage: git-commit-helper [OPTIONS]"
-    echo "Options:"
-    echo "  -t, --type TYPE     Specify commit type (feat, fix, etc.)"
-    echo "  -s, --scope SCOPE   Specify commit scope"
-    echo "  -h, --help          Show this help message"
-    echo "  --configure         Configure API key"
-    echo "  --interactive       Run in interactive mode (default)"
+    cat << 'EOF'
+Usage: git-commit-helper [OPTIONS]
+Options:
+  -t, --type TYPE     Specify commit type (feat, fix, etc.)
+  -s, --scope SCOPE   Specify commit scope
+  -h, --help         Show this help message
+  --configure        Configure API key
+  --interactive      Run in interactive mode (default)
+EOF
 }
 
 # Function to load config
@@ -52,7 +55,8 @@ print(config.get('api_key', ''))
 
 # Function to configure API key
 configure_api_key() {
-    read -p "Enter your Anthropic API key: " api_key
+    echo -n "Enter your Anthropic API key: "
+    read -r api_key
     # Using Python to update JSON config
     python3 -c "
 import json
@@ -81,7 +85,8 @@ generate_commit_message() {
     local diff_context="$1"
     local commit_type="$2"
     local scope="$3"
-    local api_key=$(load_config)
+    local api_key
+    api_key=$(load_config)
 
     if [ -z "$api_key" ]; then
         echo "Error: API key not configured. Run 'git-commit-helper --configure'" >&2
@@ -89,13 +94,16 @@ generate_commit_message() {
     }
 
     # Create cache key based on diff content
-    local cache_key=$(echo "$diff_context" | sha256sum | cut -d' ' -f1)
+    local cache_key
+    cache_key=$(echo "$diff_context" | sha256sum | cut -d' ' -f1)
     local cache_file="$CACHE_DIR/$cache_key"
 
     # Check cache
     if [ -f "$cache_file" ]; then
-        local cache_time=$(stat -c %Y "$cache_file")
-        local current_time=$(date +%s)
+        local cache_time
+        local current_time
+        cache_time=$(stat -c %Y "$cache_file")
+        current_time=$(date +%s)
         if [ $((current_time - cache_time)) -lt "$CACHE_DURATION" ]; then
             cat "$cache_file"
             return
@@ -103,7 +111,9 @@ generate_commit_message() {
     fi
 
     # Prepare the prompt
-    local prompt="Generate a git commit message following conventional commits format.
+    local prompt
+    prompt=$(cat << EOF
+Generate a git commit message following conventional commits format.
 Type: $commit_type
 ${scope:+Scope: $scope}
 
@@ -119,10 +129,13 @@ Recent commits (for style reference):
 $(get_recent_commits)
 
 Changes to be committed:
-$diff_context"
+$diff_context
+EOF
+)
 
     # Call Claude API
-    local response=$(curl -s https://api.anthropic.com/v1/messages \
+    local response
+    response=$(curl -s https://api.anthropic.com/v1/messages \
         -H "Content-Type: application/json" \
         -H "x-api-key: $api_key" \
         -H "anthropic-version: 2023-06-01" \
@@ -136,25 +149,34 @@ $diff_context"
         }")
 
     # Extract and cache the commit message
-    local commit_message=$(echo "$response" | jq -r '.content[0].text')
-    echo "$commit_message" | tee "$cache_file"
+    echo "$response" | jq -r '.content[0].text' | tee "$cache_file"
 }
 
 # Interactive mode function
 interactive_mode() {
     # Load commit types from config
-    local commit_types=$(jq -r '.commit_types[]' "$CONFIG_FILE" | tr '\n' ' ')
+    local commit_types
+    commit_types=$(jq -r '.commit_types[]' "$CONFIG_FILE")
     
+    # Create array of commit types
+    local -a types
+    while IFS= read -r type; do
+        types+=("$type")
+    done <<< "$commit_types"
+    
+    # Display menu
     echo "Select commit type:"
-    select type in $commit_types; do
+    select type in "${types[@]}"; do
         if [ -n "$type" ]; then
             break
         fi
     done
 
-    read -p "Enter scope (optional, press enter to skip): " scope
+    echo -n "Enter scope (optional, press enter to skip): "
+    read -r scope
     
-    local diff_context=$(get_git_diff)
+    local diff_context
+    diff_context=$(get_git_diff)
     if [ -z "$diff_context" ]; then
         echo "Error: No staged changes found" >&2
         exit 1
@@ -167,7 +189,7 @@ interactive_mode() {
 COMMIT_TYPE=""
 SCOPE=""
 
-while [[ $# -gt 0 ]]; do
+while [ $# -gt 0 ]; do
     case $1 in
         -t|--type)
             COMMIT_TYPE="$2"
